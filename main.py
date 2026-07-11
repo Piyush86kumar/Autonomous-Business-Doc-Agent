@@ -1,11 +1,4 @@
-"""
-FastAPI application entry point.
-
-    POST /agent   { "request": "<natural language>" }  -> AgentResponse
-    GET  /files/{filename}                              -> download the .docx
-
-Run with:  uvicorn main:app --reload
-"""
+"""FastAPI entry point — POST /agent, GET /files/{filename}."""
 
 from __future__ import annotations
 
@@ -14,7 +7,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-load_dotenv()  # populates GROQ_API_KEY from .env before any node runs
+load_dotenv()  # load GROQ_API_KEY before any node imports
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
@@ -64,8 +57,7 @@ async def run_agent(payload: AgentRequest) -> AgentResponse:
         logger.exception("Unexpected error in agent pipeline")
         raise HTTPException(status_code=500, detail=f"Internal agent error: {exc}") from exc
 
-    # LangGraph returns a dict-shaped state snapshot from ainvoke; re-validate
-    # into our Pydantic model for type-safe attribute access below.
+    # Re-validate snapshot into Pydantic model for type-safe access
     final_state = AgentState.model_validate(result)
 
     if not final_state.final_docx_path:
