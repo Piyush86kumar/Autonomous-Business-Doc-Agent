@@ -2,6 +2,20 @@
 
 A FastAPI service that accepts a natural-language business request, autonomously plans its own structure via a LangGraph state machine (Planner → Writer → Reviewer → Doc Builder, with a conditional revision loop), and returns a polished `.docx` file.
 
+![Project Architecture](asset/autonomous_doc_agent.png)
+
+### Technologies Used
+
+| Category | Tools |
+|---|---|
+| **Framework** | FastAPI, Uvicorn |
+| **Graph State Machine** | LangGraph |
+| **LLM Provider** | Groq (free tier) |
+| **Models** | `llama-3.3-70b-versatile`, `openai/gpt-oss-120b` (fallback) |
+| **Structured Output** | Pydantic, `with_structured_output` |
+| **Document Assembly** | `python-docx` |
+| **Validation** | Pydantic, custom guardrails |
+
 ## 1. Setup
 
 ```bash
@@ -28,7 +42,7 @@ The API is live at `http://127.0.0.1:8000`. Interactive docs (Swagger UI) at `ht
 curl -X POST http://127.0.0.1:8000/agent \
   -H "Content-Type: application/json" \
   -d '{
-    "request": "Create a project proposal for migrating our internal tools to a new CRM system, timeline 3 months, budget $50k."
+    "request": "Create a project proposal for migrating our internal tools from spreadsheets to a new CRM system (evaluating HubSpot vs Salesforce). Timeline is 3 months starting next quarter, budget is $50k, and the primary goal is reducing manual data entry for the sales team of 12 people. Include a rollout plan and key risks."
   }'
 ```
 
@@ -52,7 +66,7 @@ Expected: `doc_type` is `"project_proposal"`, `assumptions_made` is empty, `revi
 curl -X POST http://127.0.0.1:8000/agent \
   -H "Content-Type: application/json" \
   -d '{
-    "request": "We need something to send the client after todays call - they are not totally sold yet but want to see next steps, and honestly I am not sure if they want a formal proposal or just a summary."
+    "request": "Need something to send the client after today's call. Sales said we could do the integration in 3 weeks, but engineering mentioned on Slack it's more like 6-8 weeks realistically — not sure which number to use. Client hasn't confirmed budget yet either. Not sure if they want a formal proposal or just a quick summary of next steps, and my manager wants it before end of day."
   }'
 ```
 

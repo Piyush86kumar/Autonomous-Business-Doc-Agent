@@ -59,7 +59,7 @@ def reviewer_node(state: AgentState) -> dict:
 
     new_revision_count = state.revision_count
     if review.verdict == "needs_revision":
-        new_revision_count = state.revision_count + 1
+        new_revision_count = state.revision_count + 1  # always increment — router enforces cap
 
     log_entry = (
         f"Reviewed draft — verdict: {review.verdict}."

@@ -13,6 +13,7 @@ from schemas import AgentState
 
 def _route_after_review(state: AgentState) -> str:
     """Route back to writer if needs_revision and under cap, else finalize."""
+    # Single enforcement point — if count passes the cap the graph MUST finalize
     if (
         state.review is not None
         and state.review.verdict == "needs_revision"

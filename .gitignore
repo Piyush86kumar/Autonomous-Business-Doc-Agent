@@ -1,2 +1,4 @@
 venv/
 .env
+_nodes\__pycache__
+__pycache__
