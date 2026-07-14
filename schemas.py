@@ -16,6 +16,18 @@ class AgentRequest(BaseModel):
 class AgentResponse(BaseModel):
     plan: list[str] = Field(default_factory=list, description="Human-readable task list, for demo visibility")
     doc_type: str
+    outline: Optional[OutlineSchema] = Field(
+        default=None,
+        description="Full outline produced by the Planner node — doc_type, title, sections list",
+    )
+    sections: dict[str, SectionSchema] = Field(
+        default_factory=dict,
+        description="Drafted content per section, keyed by section_name",
+    )
+    review: Optional[ReviewSchema] = Field(
+        default=None,
+        description="Reviewer node output — verdict, gaps, and assumptions identified",
+    )
     assumptions_made: list[str] = Field(default_factory=list)
     revision_occurred: bool = False
     download_url: str

@@ -10,7 +10,7 @@ from dotenv import load_dotenv
 load_dotenv()  # load GROQ_API_KEY before any node imports
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, HTMLResponse
 
 from doc_builder import OUTPUT_DIR
 from graph import compiled_graph
@@ -68,6 +68,9 @@ async def run_agent(payload: AgentRequest) -> AgentResponse:
     return AgentResponse(
         plan=final_state.plan_log,
         doc_type=final_state.doc_type,
+        outline=final_state.outline,
+        sections=final_state.sections,
+        review=final_state.review,
         assumptions_made=final_state.assumptions_made,
         revision_occurred=final_state.revision_count > 0,
         download_url=f"/files/{filename}",
@@ -98,6 +101,14 @@ async def download_file(filename: str) -> FileResponse:
         filename=filename,
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     )
+
+
+@app.get("/", response_class=HTMLResponse)
+async def index() -> HTMLResponse:
+    """Serve the pipeline UI."""
+    html_path = Path(__file__).parent / "templates" / "index.html"
+    html_content = html_path.read_text(encoding="utf-8")
+    return HTMLResponse(content=html_content)
 
 
 @app.get("/health")

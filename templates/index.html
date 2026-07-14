@@ -1,0 +1,996 @@
+<!DOCTYPE html>
+<!--
+  ============================================================================
+  templates/index.html
+  Pipeline Visualization UI for the Autonomous Document Agent
+
+  This single-page app provides a visual interface to the POST /agent API.
+  Flow:
+    1. User enters a business request in the textarea
+    2. Clicking "Generate Document" POSTs to /agent
+    3. While waiting, a loading animation shows the pipeline nodes pulsing
+    4. On success, each node (Planner → Writer → Reviewer → Doc Builder) is
+       rendered as an expandable card showing its specific reasoning/output
+    5. A download link appears for the generated .docx
+
+  Tech: Vanilla JS — no framework dependencies.
+  ============================================================================
+-->
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Autonomous Document Agent</title>
+
+    <!--
+      Font: Inter for clean, modern typography.
+      Loaded from Google Fonts CDN; falls back to system sans-serif if offline.
+    -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+    <style>
+        /* =================================================================
+           CSS Custom Properties — single source of truth for colors/spacing
+           ================================================================= */
+        :root {
+            --color-primary: #2563eb;
+            --color-primary-light: #dbeafe;
+            --color-primary-dark: #1d4ed8;
+            --color-success: #16a34a;
+            --color-success-light: #dcfce7;
+            --color-warning: #d97706;
+            --color-warning-light: #fef3c7;
+            --color-error: #dc2626;
+            --color-error-light: #fee2e2;
+            --color-bg: #f1f5f9;
+            --color-surface: #ffffff;
+            --color-text: #1e293b;
+            --color-text-secondary: #64748b;
+            --color-border: #e2e8f0;
+            --color-timeline: #cbd5e1;
+            --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
+            --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.1);
+            --radius: 8px;
+            --radius-lg: 12px;
+            --font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            --max-width: 860px;
+        }
+
+        /* =================================================================
+           Reset & base
+           ================================================================= */
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+            font-family: var(--font-family);
+            background: var(--color-bg);
+            color: var(--color-text);
+            line-height: 1.6;
+            min-height: 100vh;
+        }
+
+        /* =================================================================
+           Utility classes
+           ================================================================= */
+        .hidden { display: none !important; }
+
+        .container {
+            max-width: var(--max-width);
+            margin: 0 auto;
+            padding: 0 20px;
+        }
+
+        /* =================================================================
+           Header
+           ================================================================= */
+        .app-header {
+            background: linear-gradient(135deg, var(--color-primary) 0%, var(--color-primary-dark) 100%);
+            color: #fff;
+            padding: 40px 0 32px;
+            text-align: center;
+        }
+        .app-header h1 {
+            font-size: 1.75rem;
+            font-weight: 700;
+            letter-spacing: -0.02em;
+        }
+        .app-header p {
+            margin-top: 8px;
+            font-size: 0.95rem;
+            opacity: 0.85;
+            max-width: 540px;
+            margin-left: auto;
+            margin-right: auto;
+        }
+
+        /* =================================================================
+           Input section
+           ================================================================= */
+        .input-section {
+            background: var(--color-surface);
+            border-radius: var(--radius-lg);
+            box-shadow: var(--shadow-md);
+            padding: 28px;
+            margin-top: -20px;
+            position: relative;
+            z-index: 10;
+        }
+        .input-section textarea {
+            width: 100%;
+            min-height: 100px;
+            padding: 14px 16px;
+            border: 1.5px solid var(--color-border);
+            border-radius: var(--radius);
+            font-family: var(--font-family);
+            font-size: 0.95rem;
+            color: var(--color-text);
+            resize: vertical;
+            transition: border-color 0.2s;
+        }
+        .input-section textarea:focus {
+            outline: none;
+            border-color: var(--color-primary);
+            box-shadow: 0 0 0 3px var(--color-primary-light);
+        }
+        .input-section textarea::placeholder {
+            color: #94a3b8;
+        }
+
+        .input-actions {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-top: 16px;
+        }
+
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 10px 24px;
+            border: none;
+            border-radius: var(--radius);
+            font-family: var(--font-family);
+            font-size: 0.95rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .btn-primary {
+            background: var(--color-primary);
+            color: #fff;
+        }
+        .btn-primary:hover:not(:disabled) {
+            background: var(--color-primary-dark);
+            transform: translateY(-1px);
+            box-shadow: var(--shadow-md);
+        }
+
+        .btn-secondary {
+            background: var(--color-bg);
+            color: var(--color-text-secondary);
+        }
+        .btn-secondary:hover {
+            background: var(--color-border);
+        }
+
+        .char-count {
+            font-size: 0.8rem;
+            color: var(--color-text-secondary);
+            margin-left: auto;
+        }
+        .char-count.over { color: var(--color-error); }
+
+        /* =================================================================
+           Error banner
+           ================================================================= */
+        .error-banner {
+            background: var(--color-error-light);
+            color: var(--color-error);
+            border: 1px solid var(--color-error);
+            border-radius: var(--radius);
+            padding: 14px 18px;
+            margin-top: 20px;
+            font-size: 0.9rem;
+            font-weight: 500;
+        }
+
+        /* =================================================================
+           Loading state — pulsing pipeline skeleton
+           ================================================================= */
+        .loading-section {
+            margin-top: 28px;
+        }
+
+        .pipeline-loader {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            position: relative;
+            padding-left: 28px;
+        }
+        /* Vertical timeline line behind the loader nodes */
+        .pipeline-loader::before {
+            content: '';
+            position: absolute;
+            left: 8px;
+            top: 12px;
+            bottom: 12px;
+            width: 2px;
+            background: var(--color-timeline);
+        }
+
+        .loader-node {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 12px 16px;
+            background: var(--color-surface);
+            border-radius: var(--radius);
+            box-shadow: var(--shadow-sm);
+            position: relative;
+        }
+        /* Timeline dot for each loader node */
+        .loader-node::before {
+            content: '';
+            position: absolute;
+            left: -24px;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 14px;
+            height: 14px;
+            border-radius: 50%;
+            background: var(--color-timeline);
+            border: 2px solid var(--color-bg);
+            transition: background 0.4s;
+        }
+        .loader-node.active::before {
+            background: var(--color-primary);
+            box-shadow: 0 0 0 4px var(--color-primary-light);
+            animation: pulse-dot 1.2s infinite;
+        }
+        .loader-node.done::before {
+            background: var(--color-success);
+        }
+
+        .loader-node .node-icon {
+            font-size: 1.3rem;
+            width: 32px;
+            text-align: center;
+        }
+        .loader-node .node-label {
+            font-weight: 600;
+            font-size: 0.9rem;
+        }
+        .loader-node .node-status-text {
+            font-size: 0.8rem;
+            color: var(--color-text-secondary);
+            flex: 1;
+        }
+        .loader-node .spinner {
+            width: 18px;
+            height: 18px;
+            border: 2px solid var(--color-border);
+            border-top-color: var(--color-primary);
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+
+        @keyframes spin { to { transform: rotate(360deg); } }
+        @keyframes pulse-dot {
+            0%, 100% { box-shadow: 0 0 0 4px var(--color-primary-light); }
+            50% { box-shadow: 0 0 0 8px rgba(37, 99, 235, 0.15); }
+        }
+
+        /* =================================================================
+           Results pipeline
+           ================================================================= */
+        .results-section {
+            margin-top: 28px;
+        }
+
+        .pipeline {
+            position: relative;
+            padding-left: 28px;
+        }
+        /* Vertical timeline line */
+        .pipeline::before {
+            content: '';
+            position: absolute;
+            left: 8px;
+            top: 12px;
+            bottom: 12px;
+            width: 2px;
+            background: var(--color-timeline);
+        }
+
+        /* ---- Individual node cards ---- */
+        .node-card {
+            background: var(--color-surface);
+            border-radius: var(--radius);
+            box-shadow: var(--shadow-sm);
+            margin-bottom: 16px;
+            overflow: hidden;
+            border: 1px solid var(--color-border);
+            transition: box-shadow 0.2s;
+            position: relative;
+        }
+        .node-card:hover { box-shadow: var(--shadow-md); }
+        /* Timeline dot */
+        .node-card::before {
+            content: '';
+            position: absolute;
+            left: -24px;
+            top: 20px;
+            width: 14px;
+            height: 14px;
+            border-radius: 50%;
+            background: var(--color-success);
+            border: 2px solid var(--color-bg);
+        }
+        /* Node cards that had issues (revision needed) get a warning dot */
+        .node-card.revision-needed::before {
+            background: var(--color-warning);
+        }
+
+        .node-header {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 14px 18px;
+            cursor: pointer;
+            user-select: none;
+        }
+        .node-header:hover { background: #f8fafc; }
+
+        .node-header .node-icon { font-size: 1.2rem; }
+        .node-header .node-name { font-weight: 600; font-size: 0.95rem; flex: 1; }
+        .node-header .node-status-badge {
+            font-size: 0.75rem;
+            font-weight: 600;
+            padding: 2px 10px;
+            border-radius: 20px;
+        }
+        .node-header .node-status-badge.approved {
+            background: var(--color-success-light);
+            color: var(--color-success);
+        }
+        .node-header .node-status-badge.needs-revision {
+            background: var(--color-warning-light);
+            color: var(--color-warning);
+        }
+        .node-header .expand-icon {
+            font-size: 0.8rem;
+            color: var(--color-text-secondary);
+            transition: transform 0.2s;
+        }
+        .node-header .expand-icon.expanded { transform: rotate(180deg); }
+
+        .node-body {
+            border-top: 1px solid var(--color-border);
+            padding: 16px 18px;
+        }
+        .node-body.collapsed { display: none; }
+
+        /* ---- Content inside node bodies ---- */
+        .detail-row {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 6px;
+            font-size: 0.9rem;
+        }
+        .detail-row .label {
+            font-weight: 600;
+            color: var(--color-text-secondary);
+            min-width: 110px;
+            flex-shrink: 0;
+        }
+
+        .section-block {
+            background: var(--color-bg);
+            border-radius: var(--radius);
+            padding: 12px 16px;
+            margin-bottom: 12px;
+        }
+        .section-block:last-child { margin-bottom: 0; }
+        .section-block .section-title {
+            font-weight: 600;
+            font-size: 0.9rem;
+            margin-bottom: 6px;
+            color: var(--color-primary);
+        }
+        .section-block .section-content {
+            font-size: 0.85rem;
+            color: var(--color-text);
+            line-height: 1.65;
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+        .section-block .table-badge {
+            display: inline-block;
+            font-size: 0.7rem;
+            font-weight: 600;
+            background: #f3e8ff;
+            color: #7c3aed;
+            padding: 1px 8px;
+            border-radius: 4px;
+            margin-left: 8px;
+        }
+
+        .gap-item, .assumption-item {
+            padding: 4px 0 4px 16px;
+            position: relative;
+            font-size: 0.88rem;
+        }
+        .gap-item::before {
+            content: '•';
+            position: absolute;
+            left: 4px;
+            color: var(--color-text-secondary);
+        }
+
+        .assumption-item {
+            font-style: italic;
+            color: var(--color-text-secondary);
+        }
+        .assumption-item::before {
+            content: '→';
+            position: absolute;
+            left: 0;
+            color: var(--color-text-secondary);
+        }
+
+        /* ---- Download card ---- */
+        .download-card {
+            background: var(--color-success-light);
+            border-radius: var(--radius);
+            padding: 18px;
+            text-align: center;
+        }
+        .download-card a {
+            display: inline-flex;
+            align-items: center;
+            gap: 10px;
+            color: var(--color-success);
+            font-weight: 700;
+            font-size: 1.05rem;
+            text-decoration: none;
+            padding: 10px 28px;
+            border: 2px solid var(--color-success);
+            border-radius: var(--radius);
+            transition: all 0.2s;
+        }
+        .download-card a:hover {
+            background: var(--color-success);
+            color: #fff;
+        }
+
+        /* =================================================================
+           Footer
+           ================================================================= */
+        .app-footer {
+            text-align: center;
+            padding: 28px 0 40px;
+            font-size: 0.8rem;
+            color: var(--color-text-secondary);
+        }
+
+        /* =================================================================
+           Responsive
+           ================================================================= */
+        @media (max-width: 600px) {
+            .app-header { padding: 28px 0 24px; }
+            .app-header h1 { font-size: 1.35rem; }
+            .input-section { padding: 20px; }
+            .input-actions { flex-wrap: wrap; }
+            .char-count { width: 100; margin-left: 0; }
+            .pipeline, .pipeline-loader { padding-left: 20px; }
+            .node-card::before, .loader-node::before { left: -16px; width: 12px; height: 12px; }
+            .detail-row { flex-direction: column; gap: 2px; }
+            .detail-row .label { min-width: auto; }
+        }
+    </style>
+</head>
+<body>
+
+<!-- ====================================================================
+     HEADER
+     ==================================================================== -->
+<header class="app-header">
+    <div class="container">
+        <h1>Autonomous Document Agent</h1>
+        <p>
+            Enter a business request below. The AI pipeline will plan, draft,
+            review, and generate a polished .docx document — with full
+            transparency into each step.
+        </p>
+    </div>
+</header>
+
+<main class="container">
+    <!-- ================================================================
+         INPUT SECTION
+         ================================================================ -->
+    <section class="input-section" id="input-section">
+        <textarea
+            id="prompt-input"
+            placeholder="e.g. Write a project proposal for a Q4 marketing campaign with a budget of $50k targeting SMB customers. Include an executive summary, strategy, budget breakdown, and timeline."
+            maxlength="4000"
+            oninput="updateCharCount()"
+        ></textarea>
+
+        <div class="input-actions">
+            <button class="btn btn-primary" id="generate-btn" onclick="generate()">
+                Generate Document
+            </button>
+            <button class="btn btn-secondary hidden" id="reset-btn" onclick="resetUI()">
+                New Request
+            </button>
+            <span class="char-count" id="char-count">0 / 4000</span>
+        </div>
+
+        <!-- Error banner (hidden by default) -->
+        <div class="error-banner hidden" id="error-banner"></div>
+    </section>
+
+    <!-- ================================================================
+         LOADING STATE — pulsing pipeline skeleton shown while the API
+         processes the request. Each node lights up in sequence.
+         ================================================================ -->
+    <section class="loading-section hidden" id="loading-section">
+        <div class="pipeline-loader">
+            <div class="loader-node active" id="loader-planner">
+                <span class="node-icon">📋</span>
+                <span class="node-label">Planner</span>
+                <span class="node-status-text">Classifying document type and planning sections...</span>
+                <span class="spinner"></span>
+            </div>
+            <div class="loader-node" id="loader-writer">
+                <span class="node-icon">✍️</span>
+                <span class="node-label">Writer</span>
+                <span class="node-status-text">Drafting each planned section...</span>
+                <span class="spinner"></span>
+            </div>
+            <div class="loader-node" id="loader-reviewer">
+                <span class="node-icon">🔍</span>
+                <span class="node-label">Reviewer</span>
+                <span class="node-status-text">Checking quality and completeness...</span>
+                <span class="spinner"></span>
+            </div>
+            <div class="loader-node" id="loader-docbuilder">
+                <span class="node-icon">📄</span>
+                <span class="node-label">Doc Builder</span>
+                <span class="node-status-text">Assembling final .docx...</span>
+                <span class="spinner"></span>
+            </div>
+        </div>
+    </section>
+
+    <!-- ================================================================
+         RESULTS SECTION — rendered after a successful API response.
+         Shows the full pipeline with expandable node cards.
+         ================================================================ -->
+    <section class="results-section hidden" id="results-section">
+        <div class="pipeline" id="pipeline-container">
+            <!--
+              Each node card is rendered dynamically by renderResults().
+              The HTML structure for each node is:
+
+              <div class="node-card" id="node-{name}">
+                  <div class="node-header" onclick="toggleNode('{name}')">
+                      <span class="node-icon">{icon}</span>
+                      <span class="node-name">{name}</span>
+                      <span class="node-status-badge">{status}</span>
+                      <span class="expand-icon expanded">▾</span>
+                  </div>
+                  <div class="node-body" id="body-{name}">
+                      <!-- Node-specific content -->
+                  </div>
+              </div>
+            -->
+        </div>
+    </section>
+
+    <!-- ================================================================
+         FOOTER
+         ================================================================ -->
+    <footer class="app-footer">
+        Autonomous Document Agent &mdash; Powered by LangGraph + Groq
+    </footer>
+</main>
+
+<!-- ====================================================================
+     JAVASCRIPT — all application logic in a single IIFE to avoid
+     polluting the global scope unnecessarily.
+     ==================================================================== -->
+<script>
+    (function () {
+        'use strict';
+
+        // ---- State -----------------------------------------------------
+        let currentState = {
+            loading: false,
+            error: null,
+            result: null,          // The parsed AgentResponse JSON
+        };
+
+        // Track which node bodies are expanded (default: all expanded)
+        let expandedNodes = {
+            planner: true,
+            writer: true,
+            reviewer: true,
+            docbuilder: true,
+        };
+
+        // ---- Translations: node key → display name & icon ------------
+        const NODE_META = {
+            planner:   { icon: '📋', label: 'Planner' },
+            writer:    { icon: '✍️', label: 'Writer' },
+            reviewer:  { icon: '🔍', label: 'Reviewer' },
+            docbuilder:{ icon: '📄', label: 'Doc Builder' },
+        };
+
+        // ---- DOM references -------------------------------------------
+        const el = {
+            input:        document.getElementById('prompt-input'),
+            generateBtn:  document.getElementById('generate-btn'),
+            resetBtn:     document.getElementById('reset-btn'),
+            charCount:    document.getElementById('char-count'),
+            errorBanner:  document.getElementById('error-banner'),
+            loading:      document.getElementById('loading-section'),
+            results:      document.getElementById('results-section'),
+            pipeline:     document.getElementById('pipeline-container'),
+        };
+
+        // ---- Char counter ---------------------------------------------
+        window.updateCharCount = function () {
+            const len = el.input.value.length;
+            el.charCount.textContent = len + ' / 4000';
+            el.charCount.classList.toggle('over', len > 3800);
+        };
+
+        // ---- Main action: POST prompt to /agent -----------------------
+        window.generate = async function () {
+            const prompt = el.input.value.trim();
+            if (!prompt) {
+                showError('Please enter a business request.');
+                return;
+            }
+            if (prompt.length < 8) {
+                showError('Request must be at least 8 characters.');
+                return;
+            }
+
+            // Reset previous state
+            hideError();
+            currentState.error = null;
+            currentState.result = null;
+
+            // Show loading UI
+            currentState.loading = true;
+            renderLoading();
+            el.generateBtn.disabled = true;
+            el.generateBtn.textContent = 'Generating...';
+            el.resetBtn.classList.add('hidden');
+            el.results.classList.add('hidden');
+
+            try {
+                const response = await fetch('/agent', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ request: prompt }),
+                });
+
+                if (!response.ok) {
+                    let detail = `Server returned ${response.status}`;
+                    try {
+                        const err = await response.json();
+                        detail = err.detail || detail;
+                    } catch (_) { /* use default */ }
+                    throw new Error(detail);
+                }
+
+                currentState.result = await response.json();
+                currentState.loading = false;
+                renderResults();
+
+            } catch (err) {
+                currentState.error = err.message;
+                currentState.loading = false;
+                showError(err.message);
+                renderIdle();
+            } finally {
+                el.generateBtn.disabled = false;
+                el.generateBtn.textContent = 'Generate Document';
+            }
+        };
+
+        // ---- Reset UI --------------------------------------------------
+        window.resetUI = function () {
+            currentState.loading = false;
+            currentState.error = null;
+            currentState.result = null;
+            el.input.value = '';
+            el.charCount.textContent = '0 / 4000';
+            el.charCount.classList.remove('over');
+            renderIdle();
+        };
+
+        // ---- Toggle node expand/collapse --------------------------------
+        window.toggleNode = function (key) {
+            expandedNodes[key] = !expandedNodes[key];
+            const body = document.getElementById('body-' + key);
+            const icon = document.querySelector('#node-' + key + ' .expand-icon');
+            if (body) body.classList.toggle('collapsed', !expandedNodes[key]);
+            if (icon) icon.classList.toggle('expanded', expandedNodes[key]);
+        };
+
+        // ---- Render helpers --------------------------------------------
+
+        /** Show loading skeleton — all nodes pulsing in sequence. */
+        function renderLoading() {
+            el.loading.classList.remove('hidden');
+            el.results.classList.add('hidden');
+            el.errorBanner.classList.add('hidden');
+            el.resetBtn.classList.add('hidden');
+
+            // Reset all loader nodes to inactive
+            document.querySelectorAll('.loader-node').forEach(n => {
+                n.classList.remove('active', 'done');
+            });
+
+            // Animate them one by one with delays
+            const loaders = ['loader-planner', 'loader-writer', 'loader-reviewer', 'loader-docbuilder'];
+            loaders.forEach((id, i) => {
+                setTimeout(() => {
+                    const node = document.getElementById(id);
+                    if (node) {
+                        // Mark previous nodes as done
+                        loaders.slice(0, i).forEach(pid => {
+                            const pn = document.getElementById(pid);
+                            if (pn) { pn.classList.remove('active'); pn.classList.add('done'); }
+                        });
+                        node.classList.add('active');
+                    }
+                }, i * 1200);
+            });
+        }
+
+        /** Reset to idle state (showing only the input section). */
+        function renderIdle() {
+            el.loading.classList.add('hidden');
+            el.results.classList.add('hidden');
+            el.errorBanner.classList.add('hidden');
+            el.resetBtn.classList.add('hidden');
+            el.generateBtn.disabled = false;
+            el.generateBtn.textContent = 'Generate Document';
+        }
+
+        /** Show the error banner with a message. */
+        function showError(msg) {
+            el.errorBanner.textContent = msg;
+            el.errorBanner.classList.remove('hidden');
+            el.loading.classList.add('hidden');
+            el.results.classList.add('hidden');
+            el.generateBtn.disabled = false;
+            el.generateBtn.textContent = 'Generate Document';
+        }
+        function hideError() {
+            el.errorBanner.classList.add('hidden');
+        }
+
+        /**
+         * Render the full pipeline results.
+         * Iterates over nodes: Planner, Writer, Reviewer, Doc Builder
+         * and builds the HTML for each based on the API response data.
+         */
+        function renderResults() {
+            const r = currentState.result;
+            if (!r) return;
+
+            el.loading.classList.add('hidden');
+            el.results.classList.remove('hidden');
+            el.resetBtn.classList.remove('hidden');
+
+            // Build pipeline HTML
+            let html = '';
+
+            // ---- 1. Planner node --------------------------------------
+            html += buildPlannerCard(r);
+            // ---- 2. Writer node ---------------------------------------
+            html += buildWriterCard(r);
+            // ---- 3. Reviewer node -------------------------------------
+            html += buildReviewerCard(r);
+            // ---- 4. Doc Builder node ----------------------------------
+            html += buildDocBuilderCard(r);
+
+            el.pipeline.innerHTML = html;
+        }
+
+        /** Build the Planner node card from the response outline. */
+        function buildPlannerCard(r) {
+            const outline = r.outline;
+            if (!outline) {
+                return nodeCard('planner', '📋', 'Planner', '', '<p style="color:var(--color-text-secondary)">No outline data available.</p>');
+            }
+
+            // Build sections list
+            let sectionsHtml = '';
+            if (outline.sections && outline.sections.length) {
+                sectionsHtml = '<div class="detail-row"><span class="label">Sections</span><div>';
+                outline.sections.forEach((s, i) => {
+                    const tableTag = s.needs_table
+                        ? ' <span style="font-size:0.7rem;background:#f3e8ff;color:#7c3aed;padding:1px 6px;border-radius:4px;">table</span>'
+                        : '';
+                    sectionsHtml += `<div style="margin-bottom:4px;">${i + 1}. <strong>${escapeHtml(s.section_name)}</strong>${tableTag}<br><span style="color:var(--color-text-secondary);font-size:0.85rem;">${escapeHtml(s.purpose)}</span></div>`;
+                });
+                sectionsHtml += '</div></div>';
+            }
+
+            const body = `
+                <div class="detail-row">
+                    <span class="label">Document Type</span>
+                    <span><strong>${escapeHtml(outline.doc_type)}</strong></span>
+                </div>
+                <div class="detail-row">
+                    <span class="label">Title</span>
+                    <span>${escapeHtml(outline.title)}</span>
+                </div>
+                ${sectionsHtml}
+            `;
+
+            return nodeCard('planner', '📋', 'Planner', '', body);
+        }
+
+        /** Build the Writer node card — one section block per drafted section. */
+        function buildWriterCard(r) {
+            const sections = r.sections || {};
+            const sectionKeys = Object.keys(sections);
+
+            if (!sectionKeys.length) {
+                return nodeCard('writer', '✍️', 'Writer', '', '<p style="color:var(--color-text-secondary)">No sections were drafted.</p>');
+            }
+
+            let body = '';
+            sectionKeys.forEach(key => {
+                const sec = sections[key];
+                const tableBadge = sec.needs_table
+                    ? '<span class="table-badge">rendered as table</span>'
+                    : '';
+                body += `
+                    <div class="section-block">
+                        <div class="section-title">
+                            ${escapeHtml(sec.section_name)} ${tableBadge}
+                        </div>
+                        <div class="section-content">${escapeHtml(sec.content)}</div>
+                    </div>
+                `;
+            });
+
+            return nodeCard('writer', '✍️', 'Writer', '', body);
+        }
+
+        /** Build the Reviewer node card — verdict, gaps, assumptions. */
+        function buildReviewerCard(r) {
+            const review = r.review;
+            if (!review) {
+                return nodeCard('reviewer', '🔍', 'Reviewer', '', '<p style="color:var(--color-text-secondary)">No review data available.</p>');
+            }
+
+            const isApproved = review.verdict === 'approved';
+            const badgeClass = isApproved ? 'approved' : 'needs-revision';
+            const badgeText = isApproved ? '✅ Approved' : '⚠️ Needs Revision';
+
+            // Gaps list
+            let gapsHtml = '';
+            if (review.gaps && review.gaps.length) {
+                gapsHtml = '<div class="detail-row"><span class="label">Gaps Found</span><div>';
+                review.gaps.forEach(g => {
+                    gapsHtml += `<div class="gap-item">${escapeHtml(g)}</div>`;
+                });
+                gapsHtml += '</div></div>';
+            } else {
+                gapsHtml = '<div class="detail-row"><span class="label">Gaps Found</span><span style="color:var(--color-success);">None — draft is complete.</span></div>';
+            }
+
+            // Assumptions list — use the top-level merged list (r.assumptions_made)
+            // which aggregates assumptions across all revision passes, matching what
+            // appears in the generated .docx document.
+            let assumptionsHtml = '';
+            const allAssumptions = r.assumptions_made || [];
+            if (allAssumptions.length) {
+                assumptionsHtml = '<div class="detail-row"><span class="label">Assumptions</span><div>';
+                allAssumptions.forEach(a => {
+                    assumptionsHtml += `<div class="assumption-item">${escapeHtml(a)}</div>`;
+                });
+                assumptionsHtml += '</div></div>';
+            }
+
+            const body = `
+                <div style="margin-bottom:12px;">
+                    <span style="font-weight:600;">Verdict: </span>
+                    <span style="font-weight:700;color:${isApproved ? 'var(--color-success)' : 'var(--color-warning)'};">${review.verdict}</span>
+                </div>
+                ${gapsHtml}
+                ${assumptionsHtml}
+            `;
+
+            return nodeCard('reviewer', '🔍', 'Reviewer', { text: badgeText, class: badgeClass }, body);
+        }
+
+        /** Build the Doc Builder node card — download link. */
+        function buildDocBuilderCard(r) {
+            const url = r.download_url || '#';
+            const filename = url.split('/').pop() || 'document.docx';
+
+            const body = `
+                <div class="download-card">
+                    <a href="${url}" target="_blank" download="${filename}">
+                        📄 Download ${escapeHtml(filename)}
+                    </a>
+                    <p style="margin-top:8px;font-size:0.85rem;color:var(--color-text-secondary);">
+                        ${escapeHtml(r.message || 'Document generated successfully.')}
+                    </p>
+                </div>
+            `;
+
+            return nodeCard('docbuilder', '📄', 'Doc Builder', '', body);
+        }
+
+        // ---- Shared helpers --------------------------------------------
+
+        /**
+         * Generate the HTML for a single pipeline node card.
+         *
+         * @param {string} key         — node identifier (planner, writer, etc.)
+         * @param {string} icon        — emoji icon
+         * @param {string} name        — display name
+         * @param {object|string} badge — { text, class } or plain string, or empty
+         * @param {string} bodyHtml    — inner HTML for the expandable body
+         */
+        function nodeCard(key, icon, name, badge, bodyHtml) {
+            const isExpanded = expandedNodes[key] !== false;
+            let badgeHtml = '';
+            if (badge) {
+                if (typeof badge === 'string') {
+                    if (badge) badgeHtml = `<span class="node-status-badge">${badge}</span>`;
+                } else {
+                    badgeHtml = `<span class="node-status-badge ${badge.class || ''}">${badge.text || ''}</span>`;
+                }
+            }
+
+            return `
+                <div class="node-card" id="node-${key}">
+                    <div class="node-header" onclick="toggleNode('${key}')">
+                        <span class="node-icon">${icon}</span>
+                        <span class="node-name">${name}</span>
+                        ${badgeHtml}
+                        <span class="expand-icon ${isExpanded ? 'expanded' : ''}">▾</span>
+                    </div>
+                    <div class="node-body ${isExpanded ? '' : 'collapsed'}" id="body-${key}">
+                        ${bodyHtml}
+                    </div>
+                </div>
+            `;
+        }
+
+        /** Simple HTML-escape to prevent XSS from LLM-generated content. */
+        function escapeHtml(str) {
+            if (!str) return '';
+            const div = document.createElement('div');
+            div.textContent = str;
+            return div.innerHTML;
+        }
+
+    })();
+</script>
+
+</body>
+</html>
